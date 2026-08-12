@@ -57,3 +57,11 @@ module "keyvault" {
 }
 
 data "azurerm_client_config" "current" {}
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  workspace_name = "law-karthik-devsecops"
+}
