@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsecops-web
+  namespace: devsecops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devsecops-web
+  template:
+    metadata:
+      labels:
+        app: devsecops-web
+    spec:
+      containers:
+        - name: devsecops-web
+          image: acrkarthikdevops17.azurecr.io/devsecops-web:v1
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
