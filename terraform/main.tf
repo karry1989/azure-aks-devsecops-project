@@ -46,3 +46,14 @@ module "aks" {
   node_count = 1
   vm_size    = "Standard_D2s_v3"
 }
+module "keyvault" {
+  source = "./modules/keyvault"
+
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  key_vault_name = "kv-karthik-devsecops"
+  tenant_id      = data.azurerm_client_config.current.tenant_id
+}
+
+data "azurerm_client_config" "current" {}
