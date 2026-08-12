@@ -57,3 +57,17 @@ output "aks_kubelet_identity_object_id" {
   description = "AKS kubelet identity object ID"
   value       = module.aks.kubelet_identity_object_id
 }
+output "keyvault_name" {
+  description = "Azure Key Vault name"
+  value       = module.keyvault.name
+}
+
+output "keyvault_id" {
+  description = "Azure Key Vault resource ID"
+  value       = module.keyvault.id
+}
+
+output "keyvault_uri" {
+  description = "Azure Key Vault URI"
+  value       = module.keyvault.uri
+}
