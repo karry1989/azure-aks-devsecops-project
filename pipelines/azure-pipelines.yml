@@ -1,0 +1,38 @@
+trigger:
+  branches:
+    include:
+      - feature/cicd
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  imageRepository: 'devsecops-web'
+  dockerfilePath: 'app/Dockerfile'
+  tag: '$(Build.SourceVersion)'
+
+stages:
+- stage: CI
+  displayName: 'Continuous Integration'
+
+  jobs:
+  - job: Build
+    displayName: 'Build Docker Image'
+
+    steps:
+    - checkout: self
+
+    - task: Docker@2
+      displayName: 'Build Docker Image'
+      inputs:
+        command: build
+        Dockerfile: '$(dockerfilePath)'
+        repository: '$(imageRepository)'
+        tags: |
+          $(tag)
+
+    - script: |
+        echo "Docker image built successfully"
+        echo "Repository: $(imageRepository)"
+        echo "Tag: $(tag)"
+      displayName: 'Show Image Information'
