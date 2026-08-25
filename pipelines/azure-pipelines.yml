@@ -15,10 +15,41 @@ variables:
 
 stages:
 # -------------------------------------------------------------------------
-# STAGE 1: CI (Build & Push Docker Image to ACR)
+# STAGE 1: Security & Quality Checks (DevSecOps)
+# -------------------------------------------------------------------------
+- stage: SecurityScan
+  displayName: 'DevSecOps Security Scans'
+  jobs:
+  - job: CodeAndIaCScan
+    displayName: 'Scan Terraform & Dockerfile'
+    steps:
+    - checkout: self
+
+    - script: |
+        echo "Installing Checkov..."
+        pip install checkov
+        echo "Running Checkov on Terraform code..."
+        checkov -d $(Build.SourcesDirectory)/terraform --soft-fail
+      displayName: 'Run Checkov IaC Security Scan'
+
+    - script: |
+        echo "Installing Trivy..."
+        sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update && sudo apt-get install -y trivy
+        
+        echo "Scanning Dockerfile configuration..."
+        trivy config $(Build.SourcesDirectory)/app/
+      displayName: 'Run Trivy Config Scan'
+
+# -------------------------------------------------------------------------
+# STAGE 2: CI (Build, Vulnerability Scan & Push to ACR)
 # -------------------------------------------------------------------------
 - stage: CI
   displayName: 'Continuous Integration'
+  dependsOn: SecurityScan
+  condition: succeeded()
   jobs:
   - job: BuildAndPush
     displayName: 'Docker Build & Push to ACR'
@@ -42,7 +73,7 @@ stages:
             $(Build.SourcesDirectory)/app
 
 # -------------------------------------------------------------------------
-# STAGE 2: CD (Deploy to AKS in 'dev' Environment)
+# STAGE 3: CD (Deploy to AKS with Key Vault Secret)
 # -------------------------------------------------------------------------
 - stage: CD
   displayName: 'Continuous Delivery'
@@ -58,8 +89,16 @@ stages:
           steps:
           - checkout: self
 
+          - task: AzureKeyVault@2
+            displayName: 'Fetch Secrets from Azure Key Vault'
+            inputs:
+              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+              KeyVaultName: 'kv-karthik-devsecops'
+              SecretsFilter: 'AppApiKey'
+              RunAsPreJob: false
+
           - task: AzureCLI@2
-            displayName: 'Authenticate with AKS & Deploy'
+            displayName: 'Deploy to AKS & Inject Secret'
             inputs:
               azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
               scriptType: 'bash'
@@ -75,6 +114,12 @@ stages:
                 echo "Applying Kubernetes manifests..."
                 kubectl apply -f $(Build.SourcesDirectory)/kubernetes/namespace.yaml
                 kubectl apply -f $(Build.SourcesDirectory)/kubernetes/service.yaml
+
+                echo "Creating / Updating K8s Secret from Key Vault..."
+                kubectl create secret generic app-secrets \
+                  --namespace $(K8S_NAMESPACE) \
+                  --from-literal=API_KEY=$(AppApiKey) \
+                  --dry-run=client -o yaml | kubectl apply -f -
 
                 echo "Updating deployment image..."
                 kubectl set image -f $(Build.SourcesDirectory)/kubernetes/deployment.yaml $(IMAGE_REPOSITORY)=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) --local -o yaml | kubectl apply -f -
