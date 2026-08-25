@@ -4,35 +4,86 @@ trigger:
       - feature/cicd
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'ubuntu-latest'
 
+# Link the Variable Group created in Azure DevOps Library
 variables:
-  imageRepository: 'devsecops-web'
-  dockerfilePath: 'app/Dockerfile'
-  tag: '$(Build.SourceVersion)'
+  - group: devsecops-dev
+  - name: dockerfilePath
+    value: 'app/Dockerfile'
+  - name: tag
+    value: '$(Build.SourceVersion)'
 
 stages:
+# -------------------------------------------------------------------------
+# STAGE 1: CI (Build & Push Docker Image to ACR)
+# -------------------------------------------------------------------------
 - stage: CI
   displayName: 'Continuous Integration'
-
   jobs:
-  - job: Build
-    displayName: 'Build Docker Image'
-
+  - job: BuildAndPush
+    displayName: 'Docker Build & Push to ACR'
     steps:
     - checkout: self
 
-    - task: Docker@2
-      displayName: 'Build Docker Image'
+    - task: AzureCLI@2
+      displayName: 'Docker Login & Build/Push via ACR'
       inputs:
-        command: build
-        Dockerfile: '$(dockerfilePath)'
-        repository: '$(imageRepository)'
-        tags: |
-          $(tag)
+        azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -e
+          echo "Logging into ACR $(ACR_NAME)..."
+          az acr login --name $(ACR_NAME)
 
-    - script: |
-        echo "Docker image built successfully"
-        echo "Repository: $(imageRepository)"
-        echo "Tag: $(tag)"
-      displayName: 'Show Image Information'
+          echo "Building and Pushing Docker image..."
+          docker build -t $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) -f $(dockerfilePath) app/
+          docker tag $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):latest
+          
+          docker push $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag)
+          docker push $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):latest
+
+# -------------------------------------------------------------------------
+# STAGE 2: CD (Deploy to AKS in 'dev' Environment)
+# -------------------------------------------------------------------------
+- stage: CD
+  displayName: 'Continuous Delivery'
+  dependsOn: CI
+  condition: succeeded()
+  jobs:
+  - deployment: DeployDev
+    displayName: 'Deploy to AKS Dev Environment'
+    environment: 'dev'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: 'Authenticate with AKS & Deploy'
+            inputs:
+              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -e
+
+                echo "Fetching AKS credentials..."
+                az aks get-credentials \
+                  --resource-group $(RESOURCE_GROUP) \
+                  --name $(AKS_NAME) \
+                  --overwrite-existing
+
+                echo "Applying Namespace..."
+                kubectl apply -f kubernetes/namespace.yaml
+
+                echo "Applying Service..."
+                kubectl apply -f kubernetes/service.yaml
+
+                echo "Updating Deployment Image..."
+                kubectl set image -f kubernetes/deployment.yaml $(IMAGE_REPOSITORY)=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) --local -o yaml | kubectl apply -f -
+
+                echo "Verifying Rollout..."
+                kubectl rollout status deployment/$(IMAGE_REPOSITORY) -n $(K8S_NAMESPACE) --timeout=120s
