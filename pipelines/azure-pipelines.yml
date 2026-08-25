@@ -6,7 +6,6 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
-# Link the Variable Group created in Azure DevOps Library
 variables:
   - group: devsecops-dev
   - name: dockerfilePath
