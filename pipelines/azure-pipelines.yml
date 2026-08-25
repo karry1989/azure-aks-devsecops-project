@@ -9,7 +9,7 @@ pool:
 variables:
   - group: devsecops-dev
   - name: dockerfilePath
-    value: 'app/Dockerfile'
+    value: '$(Build.SourcesDirectory)/app/Dockerfile'
   - name: tag
     value: '$(Build.SourceVersion)'
 
@@ -26,22 +26,20 @@ stages:
     - checkout: self
 
     - task: AzureCLI@2
-      displayName: 'Docker Login & Build/Push via ACR'
+      displayName: 'Build and Push via Azure CLI ACR'
       inputs:
         azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
           set -e
-          echo "Logging into ACR $(ACR_NAME)..."
-          az acr login --name $(ACR_NAME)
-
-          echo "Building and Pushing Docker image..."
-          docker build -t $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) -f $(dockerfilePath) app/
-          docker tag $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):latest
-          
-          docker push $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag)
-          docker push $(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):latest
+          echo "Building and pushing container image to ACR directly..."
+          az acr build \
+            --registry $(ACR_NAME) \
+            --image $(IMAGE_REPOSITORY):$(tag) \
+            --image $(IMAGE_REPOSITORY):latest \
+            --file $(dockerfilePath) \
+            $(Build.SourcesDirectory)/app
 
 # -------------------------------------------------------------------------
 # STAGE 2: CD (Deploy to AKS in 'dev' Environment)
@@ -68,21 +66,18 @@ stages:
               scriptLocation: 'inlineScript'
               inlineScript: |
                 set -e
-
                 echo "Fetching AKS credentials..."
                 az aks get-credentials \
                   --resource-group $(RESOURCE_GROUP) \
                   --name $(AKS_NAME) \
                   --overwrite-existing
 
-                echo "Applying Namespace..."
-                kubectl apply -f kubernetes/namespace.yaml
+                echo "Applying Kubernetes manifests..."
+                kubectl apply -f $(Build.SourcesDirectory)/kubernetes/namespace.yaml
+                kubectl apply -f $(Build.SourcesDirectory)/kubernetes/service.yaml
 
-                echo "Applying Service..."
-                kubectl apply -f kubernetes/service.yaml
+                echo "Updating deployment image..."
+                kubectl set image -f $(Build.SourcesDirectory)/kubernetes/deployment.yaml $(IMAGE_REPOSITORY)=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) --local -o yaml | kubectl apply -f -
 
-                echo "Updating Deployment Image..."
-                kubectl set image -f kubernetes/deployment.yaml $(IMAGE_REPOSITORY)=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) --local -o yaml | kubectl apply -f -
-
-                echo "Verifying Rollout..."
-                kubectl rollout status deployment/$(IMAGE_REPOSITORY) -n $(K8S_NAMESPACE) --timeout=120s
+                echo "Verifying deployment rollout..."
+                kubectl rollout status deployment/$(IMAGE_REPOSITORY) -n $(K8S_NAMESPACE) --timeout=180s
