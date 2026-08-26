@@ -1,0 +1,21 @@
+replicaCount: 1
+
+image:
+  repository: acrkarthikdevops17.azurecr.io/devsecops-web
+  pullPolicy: Always
+  tag: "latest"
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 80
+
+namespace: devsecops
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
