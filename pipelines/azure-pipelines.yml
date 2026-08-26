@@ -15,7 +15,7 @@ variables:
 
 stages:
 # -------------------------------------------------------------------------
-# STAGE 1: Security & Quality Checks (DevSecOps)
+# STAGE 1: DevSecOps Scans
 # -------------------------------------------------------------------------
 - stage: SecurityScan
   displayName: 'DevSecOps Security Scans'
@@ -44,7 +44,7 @@ stages:
       displayName: 'Run Trivy Config Scan'
 
 # -------------------------------------------------------------------------
-# STAGE 2: CI (Build, Vulnerability Scan & Push to ACR)
+# STAGE 2: CI (Build & Push to ACR)
 # -------------------------------------------------------------------------
 - stage: CI
   displayName: 'Continuous Integration'
@@ -64,7 +64,6 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           set -e
-          echo "Building and pushing container image to ACR directly..."
           az acr build \
             --registry $(ACR_NAME) \
             --image $(IMAGE_REPOSITORY):$(tag) \
@@ -73,7 +72,7 @@ stages:
             $(Build.SourcesDirectory)/app
 
 # -------------------------------------------------------------------------
-# STAGE 3: CD (Deploy to AKS with Key Vault Secret)
+# STAGE 3: CD (Deploy via Helm to AKS)
 # -------------------------------------------------------------------------
 - stage: CD
   displayName: 'Continuous Delivery'
@@ -81,7 +80,7 @@ stages:
   condition: succeeded()
   jobs:
   - deployment: DeployDev
-    displayName: 'Deploy to AKS Dev Environment'
+    displayName: 'Deploy via Helm to AKS'
     environment: 'dev'
     strategy:
       runOnce:
@@ -98,7 +97,7 @@ stages:
               RunAsPreJob: false
 
           - task: AzureCLI@2
-            displayName: 'Deploy to AKS & Inject Secret'
+            displayName: 'Authenticate & Deploy via Helm'
             inputs:
               azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
               scriptType: 'bash'
@@ -111,18 +110,18 @@ stages:
                   --name $(AKS_NAME) \
                   --overwrite-existing
 
-                echo "Applying Kubernetes manifests..."
-                kubectl apply -f $(Build.SourcesDirectory)/kubernetes/namespace.yaml
-                kubectl apply -f $(Build.SourcesDirectory)/kubernetes/service.yaml
-
                 echo "Creating / Updating K8s Secret from Key Vault..."
                 kubectl create secret generic app-secrets \
                   --namespace $(K8S_NAMESPACE) \
                   --from-literal=API_KEY=$(AppApiKey) \
                   --dry-run=client -o yaml | kubectl apply -f -
 
-                echo "Updating deployment image..."
-                kubectl set image -f $(Build.SourcesDirectory)/kubernetes/deployment.yaml $(IMAGE_REPOSITORY)=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY):$(tag) --local -o yaml | kubectl apply -f -
+                echo "Deploying Helm Release..."
+                helm upgrade --install devsecops $(Build.SourcesDirectory)/helm/devsecops-chart \
+                  --namespace $(K8S_NAMESPACE) \
+                  --create-namespace \
+                  --set image.repository=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY) \
+                  --set image.tag=$(tag)
 
-                echo "Verifying deployment rollout..."
-                kubectl rollout status deployment/$(IMAGE_REPOSITORY) -n $(K8S_NAMESPACE) --timeout=180s
+                echo "Verifying Rollout..."
+                kubectl rollout status deployment/devsecops-web -n $(K8S_NAMESPACE) --timeout=180s
