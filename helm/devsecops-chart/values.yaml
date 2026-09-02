@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: acrkarthikdevops17.azurecr.io/devsecops-web
   pullPolicy: Always
-  tag: "v1.0.0"
+  tag: "9b659fd68367ab7cf0bb0fac259ce0eb2c287f56"
 
 imagePullSecrets:
   - name: acr-secret
