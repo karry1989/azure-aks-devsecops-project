@@ -100,3 +100,21 @@ stages:
         git commit -m "Update image tag to $(tag) [skip ci]"
         git push origin feature/cicd
       displayName: 'Commit and Push Tag to GitHub'
+      - script: |
+        set -e
+        git config --global user.email "azdo-pipeline@devsecops.local"
+        git config --global user.name "Azure DevOps Pipeline"
+
+        # Fetch latest refs from remote
+        git fetch origin feature/cicd
+
+        # Create/reset the local branch tracking origin
+        git checkout -B feature/cicd origin/feature/cicd
+
+        # Update the image tag in values.yaml
+        sed -i 's/tag: .*/tag: "$(tag)"/g' helm/devsecops-chart/values.yaml
+
+        git add helm/devsecops-chart/values.yaml
+        git commit -m "Update image tag to $(tag) [skip ci]"
+        git push origin feature/cicd
+      displayName: 'Commit and Push Tag to GitHub'
