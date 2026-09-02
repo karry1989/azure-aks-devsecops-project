@@ -72,56 +72,31 @@ stages:
             $(Build.SourcesDirectory)/app
 
 # -------------------------------------------------------------------------
-# STAGE 3: CD (Deploy via Helm to AKS)
+# STAGE 3: GitOps (Update Manifest & Trigger Argo CD)
 # -------------------------------------------------------------------------
-- stage: CD
-  displayName: 'Continuous Delivery'
+- stage: GitOps
+  displayName: 'Update GitOps Repository'
   dependsOn: CI
   condition: succeeded()
   jobs:
-  - deployment: DeployDev
-    displayName: 'Deploy via Helm to AKS'
-    environment: 'dev'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - checkout: self
+  - job: UpdateManifest
+    displayName: 'Update values.yaml and push to Git'
+    steps:
+    - checkout: self
+      persistCredentials: true
 
-          - task: AzureKeyVault@2
-            displayName: 'Fetch Secrets from Azure Key Vault'
-            inputs:
-              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-              KeyVaultName: 'kv-karthik-devsecops'
-              SecretsFilter: 'AppApiKey'
-              RunAsPreJob: false
+    - script: |
+        set -e
+        git config --global user.email "azdo-pipeline@devsecops.local"
+        git config --global user.name "Azure DevOps Pipeline"
 
-          - task: AzureCLI@2
-            displayName: 'Authenticate & Deploy via Helm'
-            inputs:
-              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                set -e
-                echo "Fetching AKS credentials..."
-                az aks get-credentials \
-                  --resource-group $(RESOURCE_GROUP) \
-                  --name $(AKS_NAME) \
-                  --overwrite-existing
+        git checkout feature/cicd
+        git pull origin feature/cicd
 
-                echo "Creating / Updating K8s Secret from Key Vault..."
-                kubectl create secret generic app-secrets \
-                  --namespace $(K8S_NAMESPACE) \
-                  --from-literal=API_KEY=$(AppApiKey) \
-                  --dry-run=client -o yaml | kubectl apply -f -
+        # Update the image tag in values.yaml with the commit SHA
+        sed -i 's/tag: .*/tag: "$(tag)"/g' helm/devsecops-chart/values.yaml
 
-                echo "Deploying Helm Release..."
-                helm upgrade --install devsecops $(Build.SourcesDirectory)/helm/devsecops-chart \
-                  --namespace $(K8S_NAMESPACE) \
-                  --create-namespace \
-                  --set image.repository=$(ACR_NAME).azurecr.io/$(IMAGE_REPOSITORY) \
-                  --set image.tag=$(tag)
-
-                echo "Verifying Rollout..."
-                kubectl rollout status deployment/devsecops-web -n $(K8S_NAMESPACE) --timeout=180s
+        git add helm/devsecops-chart/values.yaml
+        git commit -m "Update image tag to $(tag) [skip ci]"
+        git push origin feature/cicd
+      displayName: 'Commit and Push Tag to GitHub'
