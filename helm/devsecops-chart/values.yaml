@@ -3,7 +3,10 @@ replicaCount: 1
 image:
   repository: acrkarthikdevops17.azurecr.io/devsecops-web
   pullPolicy: Always
-  tag: "latest"
+  tag: "v1.0.0"
+
+imagePullSecrets:
+  - name: acr-secret
 
 service:
   type: ClusterIP

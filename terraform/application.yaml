@@ -1,0 +1,20 @@
+﻿apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devsecops-web
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/karry1989/azure-aks-devsecops-project.git
+    targetRevision: feature/cicd
+    path: helm/devsecops-chart
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

@@ -4,11 +4,17 @@ metadata:
   name: {{ .Release.Name }}-ingress
   namespace: {{ .Values.namespace }}
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  tls:
+  - hosts:
+    - "98.70.220.229.nip.io"
+    secretName: devsecops-tls-secret
   rules:
-  - http:
+  - host: "98.70.220.229.nip.io"
+    http:
       paths:
       - path: /
         pathType: Prefix
